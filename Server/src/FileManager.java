@@ -99,9 +99,8 @@ public class FileManager {
                         oldFile.delete();
                     }
                     else {
-                        oldFile.renameTo(newFile);
-                        oldFile = newFile;
-                        oldFile.setLastModified(System.currentTimeMillis());
+                        oldFile.delete();
+                        newFile.createNewFile();
                     }
                 }
             }

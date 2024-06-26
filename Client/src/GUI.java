@@ -24,7 +24,28 @@ public class GUI{
         frame = new JFrame("Remote File Host");
         frame.setSize(512, 512);
         frame.setLocation(704, 284);
-        frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
+        frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        frame.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent windowEvent) {
+                JDialog confirm = new JDialog(frame, "Close Option", true);
+                confirm.setLayout(null);
+                confirm.setSize(400, 200);
+
+                JButton yes = new JButton("Exit");
+                yes.setBounds(5, 30, 175, 80);
+                yes.addActionListener(e -> Exit());
+                confirm.add(yes);
+
+                JButton no = new JButton("Minimize");
+                no.setBounds(200, 30, 175, 80);
+                no.addActionListener(e -> Minimize(confirm));
+                confirm.add(no);
+
+                confirm.setLocationRelativeTo(frame);
+                confirm.setVisible(true);
+            }
+        });
         frame.setLayout(null);
         frame.setBackground(Color.LIGHT_GRAY);
 
@@ -50,6 +71,7 @@ public class GUI{
                 @Override
                 public void actionPerformed(ActionEvent e) {
                     SetVisible();
+                    client.visible.set(true);
                 }
             });
             trayPopupMenu.add(action);
@@ -62,6 +84,16 @@ public class GUI{
                 awtException.printStackTrace();
             }
         }
+    }
+
+    private synchronized void Exit() {
+        System.exit(0);
+    }
+
+    private synchronized void Minimize(JDialog dialog) {
+        dialog.dispose();
+        frame.setVisible(false); //********** Remove
+        client.visible.set(false);
     }
 
     private synchronized static void addMenuItem(JMenu menu, String title, ActionListener actionListener) {
