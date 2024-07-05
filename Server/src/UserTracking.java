@@ -66,10 +66,11 @@ public class UserTracking {
     //1 == LogOut, args[0] = email, returns void
     //2 == NotifyThreads, args[0] = email
     //8 == DeleteAccount, args[0] = email
-    public Object Log(int operation, String[] args, MessageHandlerThread thread) {
+    public Object Log(int operation, String[] args, MessageHandlerThread thread, List<File> filesAdded, List<File> filesDeleted, List<File> foldersAdded, HashMap<File, File> filesRenamed) {
         if (operation == 0) return Login(args, thread);
         else if (operation == 1) LogOut(args, thread);
         else if (operation == 2) NotifyThreads(args);
+        else if (operation == 3) UpdateChangeList(args, filesAdded, filesDeleted, foldersAdded, filesRenamed);
         else if (operation == 8) {
             if (Access(8, args).getFirst()) {
                 DeleteThreads(args);
@@ -78,6 +79,16 @@ public class UserTracking {
             else return false;
         }
         return null;
+    }
+
+    private void UpdateChangeList(String[] args, List<File> filesAdded, List<File> filesDeleted, List<File> foldersAdded, HashMap<File, File> filesRenamed) {
+        List<MessageHandlerThread> list = emailToHandlers.get(args[0]);
+        for (MessageHandlerThread m : list) {
+            m.filesAdded.addAll(filesAdded);
+            m.filesDeleted.addAll(filesDeleted);
+            m.filesRenamed.putAll(filesRenamed);
+            m.foldersAdded.addAll(foldersAdded);
+        }
     }
 
     private void NotifyThreads(String[] args) {

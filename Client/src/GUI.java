@@ -10,17 +10,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class GUI{
 
     private JMenuBar topMenu;
-    private JFrame frame;
+    public JFrame frame;
     private ServerCommunication server;
-    public AtomicBoolean remembered;
-    private String currentEmail;
     private final Client client;
 
     public GUI(ServerCommunication server, Client client) {
         this.client = client;
-        currentEmail = null;
         this.server = server;
-        remembered = new AtomicBoolean(false);
         frame = new JFrame("Remote File Host");
         frame.setSize(512, 512);
         frame.setLocation(704, 284);
@@ -51,7 +47,6 @@ public class GUI{
 
         topMenu = new JMenuBar();
         frame.setJMenuBar(topMenu);
-        SetDisconnected();
 
         if (SystemTray.isSupported()) {
             SystemTray systemTray = SystemTray.getSystemTray();
@@ -96,18 +91,10 @@ public class GUI{
         client.visible.set(false);
     }
 
-    private synchronized static void addMenuItem(JMenu menu, String title, ActionListener actionListener) {
+    public synchronized static void addMenuItem(JMenu menu, String title, ActionListener actionListener) {
         JMenuItem menuItem = new JMenuItem(title);
         menuItem.addActionListener(actionListener);
         menu.add(menuItem);
-    }
-
-    public synchronized String AccessCurrentEmail(boolean set, String email) {
-        if (set) {
-            currentEmail = email;
-            return null;
-        }
-        else return currentEmail;
     }
 
     public synchronized void SetLoggedIn() {
@@ -134,13 +121,13 @@ public class GUI{
 
         // Add menu items
         addMenuItem(account, "Change Password", e -> ChangePass());
-        if (remembered.get()) addMenuItem(account, "Forget Device", e -> ForgetDevice());
+        if (client.remembered.get()) addMenuItem(account, "Forget Device", e -> ForgetDevice());
         addMenuItem(account, "Delete Account", e -> DeleteConfirmation());
-        addMenuItem(account, "Logout", e -> Logout());
+        addMenuItem(account, "Logout", e -> client.Logout());
 
-        addMenuItem(config, "Home Directory", e -> HomeDir(false));
-        if (server.sync.get()) addMenuItem(config, "Pause Sync", e -> Sync(true));
-        else addMenuItem(config, "Resume Sync", e -> Sync(false));
+        addMenuItem(config, "Home Directory", e -> HomeDir(""));
+        if (client.syncOn.get()) addMenuItem(config, "Pause Sync", e -> client.Sync());
+        else addMenuItem(config, "Resume Sync", e -> client.Sync());
 
         SetStartupBar();
 
@@ -168,14 +155,14 @@ public class GUI{
     }
 
     private synchronized void DeleteAccount(JDialog dialog) {
-        String response = server.SendAndReceive("delete_account"), email = AccessCurrentEmail(false, null);
-        if (!response.equals("failed")) {
-            dialog.setVisible(false);
+        server.SendAndReceive("delete_account", null);
+        dialog.setVisible(false);
+        /*if (!response.equals("failed")) {
             File config = new File("config-" + email + ".txt");
             if (config.exists()) config.delete();
             File key = new File("key.txt");
             if (key.exists()) key.delete();
-        }
+        }*/
     }
 
     private synchronized void CloseWindow(JDialog dialog) {
@@ -229,7 +216,7 @@ public class GUI{
 
         JLabel serverStatusText;
 
-        if (server.connected.get()) {
+        if (client.connected.get()) {
             serverStatusText = new JLabel("Online");
             serverStatusText.setForeground(Color.GREEN);
             serverStatusText.setFont(new Font("Aptos", Font.PLAIN, 12));
@@ -253,13 +240,6 @@ public class GUI{
             }
         });
 
-        if (AccessCurrentEmail(false, null) != null) {
-            JMenu config = new JMenu("Config");
-            topMenu.add(config);
-            addMenuItem(config, "Home Directory", e -> HomeDir(false));
-            if (server.sync.get()) addMenuItem(config, "Pause Sync", e -> Sync(true));
-            else addMenuItem(config, "Resume Sync", e -> Sync(false));
-        }
 
         SetStartupBar();
 
@@ -323,47 +303,52 @@ public class GUI{
         if (email.isEmpty() || pass.isEmpty() || compass.isEmpty()) {
             msg = "Invalid Field";
             err.setForeground(Color.red);
+            err.setText(msg);
+            err.repaint();
+            err.revalidate();
+            dialog.repaint();
+            dialog.revalidate();
         }
         else if (!ValidEmail(email)) {
             msg = "Invalid Email";
             err.setForeground(Color.red);
+            err.setText(msg);
+            err.repaint();
+            err.revalidate();
+            dialog.repaint();
+            dialog.revalidate();
         }
         else if (!pass.equals(compass)) {
             msg = "Passwords do not Match";
             err.setForeground(Color.red);
+            err.setText(msg);
+            err.repaint();
+            err.revalidate();
+            dialog.repaint();
+            dialog.revalidate();
         }
         else if (pass.length() < 6 || !CheckAlpha(pass)) {
             msg = "At least 6 characters & alphanumeric";
             err.setForeground(Color.red);
+            err.setText(msg);
+            err.repaint();
+            err.revalidate();
+            dialog.repaint();
+            dialog.revalidate();
         }
         else  {
             msg = "new_user " + email + " " + pass;
-            msg = server.SendAndReceive(msg);
-            String[] split = null;
-            if (msg != null)  split = msg.split(" ");
-            if (msg != null && split[0].equals("approved")) err.setForeground(Color.green);
-            else err.setForeground(Color.red);
-
-            if (msg == null || split[1].equals("failed_access")) msg = "Error Registering";
-            else if (split[0].equals("approved")) msg = "Success";
-            else msg = "User Already Exists";
+            server.SendAndReceive(msg, err);
         }
-        err.setText(msg);
-        err.repaint();
-        err.revalidate();
-        dialog.repaint();
-        dialog.revalidate();
     }
 
     public synchronized void SetDisconnected() {
         topMenu = new JMenuBar();
         frame.getContentPane().removeAll();
         frame.setJMenuBar(topMenu);
-        if (AccessCurrentEmail(false, null) != null) {
-            JMenu account = new JMenu("Account");
-            topMenu.add(account);
-            addMenuItem(account, "Logout", e -> Logout());
-        }
+        JMenu account = new JMenu("Account");
+        topMenu.add(account);
+        addMenuItem(account, "Logout", e -> client.Logout());
         JLabel connection = new JLabel("Server Offline");
         connection.setFont(new Font("Aptos", Font.BOLD, 40));
         connection.setForeground(Color.RED);
@@ -421,7 +406,7 @@ public class GUI{
         resetDialog.setVisible(true);
     }
 
-    public synchronized void HomeDir(boolean err) {
+    public synchronized void HomeDir(String err) {
         JDialog home = new JDialog(frame, "Home Directory", true);
         home.setLayout(null);
         home.setSize(450, 120);
@@ -434,15 +419,15 @@ public class GUI{
         homeText.setBounds(70, 5, 360, 20);
         home.add(homeText);
 
-        if (err) {
-            JLabel notExist = new JLabel("Error with Directory");
-            notExist.setFont(new Font(null, Font.BOLD, 10));
-            notExist.setBounds(165, 30, 150, 20);
-            home.add(notExist);
-        }
+        JLabel notExist = new JLabel(err);
+        notExist.setFont(new Font(null, Font.BOLD, 10));
+        notExist.setBounds(165, 30, 150, 20);
+        notExist.setForeground(Color.RED);
+        home.add(notExist);
+
 
         JButton apply = new JButton("Apply");
-        apply.addActionListener(e -> ChangeDir(homeText, home));
+        apply.addActionListener(e -> client.ChangeDir(homeText, home, notExist));
         apply.setBounds(180, 48, 80, 30);
         home.add(apply);
 
@@ -450,81 +435,10 @@ public class GUI{
         home.setVisible(true);
     }
 
-    private void ChangeDir(JTextField home, JDialog dialog) {
-        File dir = new File(home.getText());
-        if (!dir.exists()) dir.mkdir();
-        if (dir.exists()) {
-            server.AccessDir(true, dir.getAbsolutePath());
-            String email = AccessCurrentEmail(false, null);
-            File config = new File("config-" + email + ".txt");
-            File newConfig = new File("temp-" + email + ".txt");
-            try {
-                Scanner scanner = new Scanner(new FileReader(config));
-                PrintWriter out = new PrintWriter(new FileWriter(newConfig));
-                String[] args;
-                String text;
-                while (scanner.hasNext()) {
-                    text = scanner.nextLine();
-                    args = text.split(" ");
-                    if (args[0].equals("directory")) out.println("directory " + dir.getAbsolutePath());
-                    else out.println(text);
-                    out.flush();
-                }
-                out.close();
-                scanner.close();
-                System.out.println(config.delete());
-                System.out.println(newConfig.renameTo(config));
-                LoadConfig(email);
-                dialog.setVisible(false);
-                HomeDir(false);
-            } catch (IOException e) {
-                dialog.setVisible(false);
-                HomeDir(true);
-            }
-        }
-        else {
-            dialog.setVisible(false);
-            HomeDir(true);
-        }
-    }
-
-    public synchronized void Sync(boolean state) {
-        try {
-            String email = AccessCurrentEmail(false, null);
-            File config = new File("config-" + email + ".txt");
-            File newConfig = new File("temp-" + email + ".txt");
-            Scanner scanner = new Scanner(new FileReader(config));
-            PrintWriter out = new PrintWriter(new FileWriter(newConfig));
-            String[] args;
-            String text;
-            while (scanner.hasNext()) {
-                text = scanner.nextLine();
-                args = text.split(" ");
-                if (args[0].equals("sync")) out.println("sync " + !state);
-                else out.println(text);
-                out.flush();
-            }
-            out.close();
-            scanner.close();
-            System.out.println(config.delete());
-            System.out.println(newConfig.renameTo(config));
-            frame.getJMenuBar().getMenu(1).remove(1);
-            if (state) {
-                addMenuItem(frame.getJMenuBar().getMenu(1), "Resume Sync", e -> Sync(!state));
-                server.firstSync.set(false);
-            }
-            else addMenuItem(frame.getJMenuBar().getMenu(1), "Pause Sync", e -> Sync(!state));
-
-            server.sync.set(!state);
-            frame.revalidate();
-            LoadConfig(email);
-        }
-        catch (IOException _) {}
-    }
 
     public synchronized void ForgetDevice() {
         File key = new File("key.txt");
-        if (server.connected.get() && key.exists()) {
+        if (client.connected.get() && key.exists()) {
             StringBuilder msg = new StringBuilder("forget_device ");
             int i = 0;
             try {
@@ -535,18 +449,18 @@ public class GUI{
                     i++;
                 }
                 msg.append(HWID.getHWID());
-                server.SendAndReceive(msg.toString()).split(" ");
+                server.SendAndReceive(msg.toString(), null);
                 scanner.close();
                 topMenu.getMenu(0).remove(1);
                 frame.revalidate();
-            } catch (FileNotFoundException _) {}
+            } catch (FileNotFoundException ignored) {}
         }
         if (key.exists()) System.out.println(key.delete());
     }
 
     private synchronized void ApplyNewPass(JTextField oldPass, JTextField newPass, JTextField comPassword, JDialog dialog, JLabel err) {
         String oldPassword = oldPass.getText(), newPassword = newPass.getText(), comPass = comPassword.getText();
-        String msg = "change_pass " + AccessCurrentEmail(false, null) + " " + oldPassword + " " + newPassword;
+        String msg = "change_pass " + oldPassword + " " + newPassword;
         if (oldPassword.isEmpty() || newPassword.isEmpty()) {
             err.setText("Invalid Field");
             err.setForeground(Color.RED);
@@ -574,22 +488,7 @@ public class GUI{
             dialog.revalidate();
         }
         else {
-            msg = server.SendAndReceive(msg);
-            if (msg != null && msg.equals("approved")) err.setForeground(Color.green);
-            else err.setForeground(Color.red);
-
-            if (msg == null) msg = "Error Changing Password";
-            else if (msg.equals("approved")) msg = "Success";
-            else msg = "Incorrect Old Password";
-
-            err.setText(msg);
-            err.repaint();
-            err.revalidate();
-            dialog.repaint();
-            dialog.revalidate();
-
-            System.out.println("Failed Pass");
-
+            server.SendAndReceive(msg, err);
         }
     }
 
@@ -598,37 +497,7 @@ public class GUI{
         if (!email.getText().isEmpty() && !pass.getText().isEmpty()) {
             if (!remember.isSelected()) serverMsg = "existing_user " + emailText + " " + password;
             else serverMsg = "existing_user_remember " + email.getText() + " " + pass.getText() + " " + HWID.getHWID();
-            serverMsg = server.SendAndReceive(serverMsg);
-            if (serverMsg == null) {
-                server.connected.set(false);
-                if (!remembered.get()) SetLoggedOut();
-                else SetDisconnected();
-            }
-            else {
-                String[] args = serverMsg.split(" ");
-                if (args[0].equals("approved")) {
-                    if (args.length == 2) {
-                        File key = new File("key.txt");
-                        if (key.exists()) key.delete();
-                        key.createNewFile();
-                        PrintWriter out = new PrintWriter(new FileWriter(key));
-                        out.println(emailText);
-                        out.println(args[1]);
-                        out.flush();
-                        out.close();
-                        remembered.set(true);
-                    }
-                    AccessCurrentEmail(true, emailText);
-                    LoadConfig(emailText);
-                    SetLoggedIn();
-                }
-                else {
-                    err.setText("Incorrect Email or Password");
-                    err.revalidate();
-                    frame.repaint();
-                    frame.revalidate();
-                }
-            }
+            server.SendAndReceive(serverMsg, err);
         }
         else {
             err.setText("Invalid Field");
@@ -637,60 +506,7 @@ public class GUI{
             frame.revalidate();
         }
     }
-    public synchronized void Logout() {
-        remembered.set(false);
-        ForgetDevice();
-        server.SendAndReceive("logout");
-        AccessCurrentEmail(true, null);
-        server.firstSync.set(false);
-        SetLoggedOut();
-    }
 
-    public synchronized void LoadConfig(String email) {
-        System.out.println("HERE1");
-        File config = new File("config-" + email + ".txt");
-        try {
-            if (!config.exists()) MakeDefaultConfig(email);
-            String[] args;
-            Scanner scanner = new Scanner(config);
-            String text;
-            while (scanner.hasNext()) {
-                text = scanner.nextLine();
-                args = text.split(" ");
-                if (args[0].equals("directory")) {
-                    server.AccessDir(true, text.substring(text.indexOf(" ") + 1));
-                    File temp = new File(text.substring(text.indexOf(" ") + 1));
-                    if (!temp.exists()) temp.mkdir();
-                }
-                else if (args[0].equals("sync")) {
-                    server.sync.set(!args[1].equals("false"));
-                    System.out.println(server.sync.get());
-                }
-            }
-            scanner.close();
-            System.out.println("HERE2");
-            if (server.sync.get() && server.connected.get()) {
-                server.firstSync.set(false);
-            }
-            else if (!server.sync.get() && server.connected.get()) {
-                server.SendAndReceive("file unsync");
-            }
-        } catch (IOException e) {
-            Logout();
-        }
-    }
-
-    private synchronized void MakeDefaultConfig(String email) throws IOException {
-        File config = new File("config-" + email + ".txt");
-        File home = new File("Home Directory");
-        if (!home.exists()) System.out.println(home.mkdir());
-        System.out.println(config.createNewFile());
-        PrintWriter out = new PrintWriter(new FileWriter(config));
-        out.println("directory " + home.getAbsolutePath());
-        out.println("sync true");
-        out.flush();
-        out.close();
-    }
 
     private synchronized void SetStartupBar() {
         JMenu startup = new JMenu("Startup");
@@ -730,7 +546,7 @@ public class GUI{
             toggle.getItem(0).revalidate();
             topMenu.revalidate();
             frame.revalidate();
-        } catch (IOException _) {}
+        } catch (IOException ignored) {}
     }
 
     private boolean CheckAlpha(String msg) {

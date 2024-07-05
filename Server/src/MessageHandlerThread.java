@@ -3,10 +3,7 @@ import libs.Pair;
 
 import java.io.*;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MessageHandlerThread implements Runnable{
@@ -24,15 +21,20 @@ public class MessageHandlerThread implements Runnable{
     public AtomicBoolean update;
     public AtomicBoolean sync;
 
+    public List<File> filesAdded;
+    public List<File> foldersAdded;
+    public List<File> filesDeleted;
+    public HashMap<File, File> filesRenamed;
+
     String email;
 
-    public List<Pair<FileClass, Object>> activeFiles;
-    public List<Pair<FileClass, Object>> deletedFiles;
 
     public MessageHandlerThread(Socket socket, UserTracking users) throws IOException {
-        activeFiles = new ArrayList<>();
-        deletedFiles = new ArrayList<>();
         sync = new AtomicBoolean(false);
+        filesAdded = new ArrayList<>();
+        filesDeleted = new ArrayList<>();
+        filesRenamed =  new HashMap<>();
+        foldersAdded = new ArrayList<>();
         this.socket = socket;
         valid = new AtomicBoolean();
         update = new AtomicBoolean(false);
@@ -135,11 +137,15 @@ public class MessageHandlerThread implements Runnable{
     private void Standby() throws IOException {
         String[] args;
         args = new String[]{email};
-        if ((manager = (FileManager) users.Log(0, args, this)) == null) {
+        if ((manager = (FileManager) users.Log(0, args, this, null, null, null, null)) == null) {
             LogOut();
             return;
         }
-        sync.set(true);
+        sync.set(false);
+        filesRenamed.clear();
+        filesAdded.clear();
+        filesDeleted.clear();
+        foldersAdded.clear();
         while (true) {
             try {
                 String text;
@@ -151,12 +157,18 @@ public class MessageHandlerThread implements Runnable{
                 }
                 switch (args[0]) {
                     case "ping" -> {
+                        if (update.get()) {
+                            if (manager.Access(-1, outputStream, inputStream, download, upload, socket, this) == null) {
+                                LogOut();
+                                return;
+                            }
+                        }
                         outputStream.writeUTF("ping");
                         outputStream.flush();
-                        System.out.println("ping");
                     }
                     case "logout" -> {
                         LogOut();
+                        return;
                     }
                     case "delete_account" -> {
                         System.out.println("HERE");
@@ -166,7 +178,7 @@ public class MessageHandlerThread implements Runnable{
                         else outputStream.writeUTF("failed");
                         outputStream.flush();
                         if (result){
-                            users.Log(1, check, this);
+                            users.Log(1, check, this, null, null, null, null);
                             manager = null;
                             email = null;
                             return;
@@ -193,10 +205,7 @@ public class MessageHandlerThread implements Runnable{
                                 }
                             }
                             case "unsync" -> {
-                                if (manager.Access(1, null, null, null, null, null, this) == null) {
-                                    LogOut();
-                                    return;
-                                }
+                                sync.set(false);
                             }
                             case "change" -> {
                                 if (manager.Access(2, outputStream, inputStream, download, upload, socket, this) == null) {
@@ -223,7 +232,7 @@ public class MessageHandlerThread implements Runnable{
 
     private void LogOut() throws IOException {
         String[] check = {email};
-        users.Log(1, check, this);
+        users.Log(1, check, this, null, null, null, null);
         manager = null;
         outputStream.writeUTF("logout");
         outputStream.flush();

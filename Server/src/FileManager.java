@@ -13,15 +13,11 @@ public class FileManager {
     public AtomicBoolean active;
     private final String email;
 
-    private List<Pair<FileClass, Object>> activeFiles;
-    private List<Pair<FileClass, Object>> deletedFiles;
-
     public FileManager(String email, UserTracking users) {
         this.email = email;
         active = new AtomicBoolean(true);
         this.users = users;
         HomeDirectory = new File("User Folders/" + email);
-        UpdateMetaData();
         if (!HomeDirectory.exists()) {
             HomeDirectory.mkdir();
         }
@@ -31,9 +27,19 @@ public class FileManager {
     //2 == Upload
     public synchronized Object Access(int operation, DataOutputStream dialogOut, DataInputStream dialogIn, InputStream inputStream, OutputStream outputStream, Socket socket, MessageHandlerThread thread) throws IOException {
         if (!active.get() || !thread.valid.get()) return null;
-        else if (!thread.sync.get() && thread.update.get()) thread.update.set(false);
+        else if (!thread.sync.get() && thread.update.get()) {
+            thread.update.set(false);
+            thread.filesDeleted.clear();
+            thread.filesAdded.clear();
+            thread.filesRenamed.clear();
+        }
         else if (thread.sync.get() && thread.update.get()) {
-
+            FileUploader(dialogOut, dialogIn, inputStream, outputStream, thread);
+            thread.foldersAdded.clear();
+            thread.filesAdded.clear();
+            thread.filesRenamed.clear();
+            thread.filesDeleted.clear();
+            thread.update.set(false);
         }
         if (dialogOut != null) {
             dialogOut.writeUTF("good");
@@ -42,43 +48,102 @@ public class FileManager {
         if (operation == 0) {
             try {
                 Sync(dialogOut, dialogIn, inputStream, outputStream);
-                UpdateMetaData();
+                thread.filesRenamed.clear();
+                thread.filesAdded.clear();
+                thread.filesDeleted.clear();
                 thread.sync.set(true);
-                users.Log(2, new String[]{email}, thread);
+                users.Log(2, new String[]{email}, thread, null, null, null, null);
                 thread.update.set(false);
-                thread.activeFiles = new ArrayList<>(activeFiles);
-                thread.deletedFiles = new ArrayList<>(deletedFiles);
                 return "good";
             } catch (IOException e) {
                 try {
                     socket.close();
-                } catch (IOException _) {}
+                } catch (IOException ignored) {}
             }
         }
-        else if (operation == 1) thread.sync.set(false);
         else if (operation == 2) {
             try {
                 Upload(dialogOut, dialogIn, inputStream, thread);
-                UpdateMetaData();
-                users.Log(2, new String[]{email}, thread);
+                users.Log(2, new String[]{email}, thread, null, null, null, null);
                 thread.update.set(false);
-                thread.activeFiles = new ArrayList<>(activeFiles);
-                thread.deletedFiles = new ArrayList<>(deletedFiles);
+                thread.filesRenamed.clear();
+                thread.filesAdded.clear();
+                thread.filesDeleted.clear();
                 return true;
             } catch (IOException e) {
                 try {
                     socket.close();
                     return null;
-                } catch (IOException _) {}
+                } catch (IOException ignored) {}
             }
         }
-        else if (operation == 8) return users.Log(8, new String[]{email}, null);
-        return null;
+        else if (operation == 8) return users.Log(8, new String[]{email}, null, null, null, null, null);
+        return false;
+    }
+
+    private void FileUploader(DataOutputStream dialogOut, DataInputStream dialogIn, InputStream inputStream, OutputStream outputStream, MessageHandlerThread thread) throws IOException {
+        AddFile(thread.foldersAdded, dialogOut, dialogIn, inputStream, outputStream);
+        RenameFile(thread.filesRenamed, dialogOut);
+        DeleteFile(thread.filesDeleted, dialogOut);
+        AddFile(thread.filesAdded, dialogOut, dialogIn, inputStream, outputStream);
+        dialogOut.writeUTF("*");
+        dialogOut.flush();
+    }
+
+    private void DeleteFile(List<File> files, DataOutputStream dialogOut) throws IOException {
+        for (File f : files) {
+            dialogOut.writeUTF("delete");
+            dialogOut.writeUTF(ConcatFile(f));
+            dialogOut.flush();
+        }
+    }
+
+    private void RenameFile(HashMap<File, File> fileToRename, DataOutputStream dialogOut) throws IOException {
+        for (Map.Entry<File, File> e : fileToRename.entrySet()) {
+            dialogOut.writeUTF("rename");
+            dialogOut.writeUTF(ConcatFile(e.getKey()));
+            dialogOut.writeUTF(ConcatFile(e.getValue()));
+            dialogOut.flush();
+        }
+    }
+
+    private void AddFile(List<File> files, DataOutputStream dialogOut, DataInputStream dialogIn, InputStream inputStream, OutputStream outputStream) throws IOException {
+        byte[] buffer;
+        long bytesLeft;
+        int n;
+        for (File f : files) {
+            dialogOut.writeUTF("add");
+            if (f.isDirectory()) dialogOut.writeUTF("folder");
+            else dialogOut.writeUTF("file");
+            dialogOut.writeUTF(ConcatFile(f));
+            dialogOut.writeLong(f.lastModified());
+            dialogOut.flush();
+            if (!f.isDirectory()) {
+                dialogOut.writeLong(f.length());
+                dialogOut.flush();
+                if (!dialogIn.readUTF().equals("skip")) {
+                    InputStream fileStream = new FileInputStream(f);
+                    bytesLeft = f.length();
+                    buffer = new byte[8192];
+                    while (bytesLeft > 0) {
+                        n = fileStream.read(buffer, 0, (int) Math.min(buffer.length, bytesLeft));
+                        if (n < 0) {
+                            throw new EOFException("Expected " + bytesLeft + " more bytes to read");
+                        }
+                        outputStream.write(buffer, 0, n);
+                        bytesLeft -= n;
+                    }
+                    fileStream.close();
+                }
+            }
+        }
     }
 
     private void Upload(DataOutputStream dialogOut, DataInputStream dialogIn, InputStream inputStream, MessageHandlerThread thread) throws IOException {
         String args;
         String[] split;
+        List<File> filesAdded = new ArrayList<>(), filesDeleted = new ArrayList<>(), foldersAdded = new ArrayList<>();
+        HashMap<File, File> filesRenamed = new HashMap<>();
         while (!(args = dialogIn.readUTF()).equals("*")) {
             System.out.println(args);
             String oldName, newName;
@@ -103,6 +168,7 @@ public class FileManager {
                         newFile.createNewFile();
                     }
                 }
+                filesDeleted.add(oldFile);
             }
             else if (split[0].equals("rename")) {
                 oldName = dialogIn.readUTF();
@@ -110,25 +176,15 @@ public class FileManager {
                 oldFile = GetFile(oldName, HomeDirectory.getAbsolutePath());
                 newFile = GetFile(newName, HomeDirectory.getAbsolutePath());
                 deleteTemp = new File(newFile.getAbsolutePath() + ".deleted");
-                if (oldFile.isDirectory()) {
-                    System.out.println("Renamed Directory: " + oldFile.getAbsolutePath());
-                    if (newFile.exists()) {
-                        Delete(newFile);
-                        MoveTo(oldFile, newFile);
-                    } else if (deleteTemp.exists()) MoveTo(oldFile, deleteTemp);
-                    else MoveTo(oldFile, newFile);
-                    Delete(oldFile);
-                }
-                else {
-                    System.out.println("Renamed File: " + oldFile.getAbsolutePath());
-                    if (deleteTemp.exists()) deleteTemp.delete();
-                    else if (newFile.exists()) newFile.delete();
-                    deleteTemp = new File(oldFile.getAbsolutePath() + ".deleted");
-                    deleteTemp.createNewFile();
-                    oldFile.renameTo(newFile);
-                    oldFile = newFile;
-                    oldFile.setLastModified(System.currentTimeMillis());
-                }
+                System.out.println("Renamed File: " + oldFile.getAbsolutePath());
+                if (deleteTemp.exists()) deleteTemp.delete();
+                else if (newFile.exists()) newFile.delete();
+                deleteTemp = new File(oldFile.getAbsolutePath() + ".deleted");
+                deleteTemp.createNewFile();
+                oldFile.renameTo(newFile);
+                oldFile = newFile;
+                oldFile.setLastModified(System.currentTimeMillis());
+                filesRenamed.put(oldFile, newFile);
             }
             else {
                 String type = dialogIn.readUTF();
@@ -157,6 +213,7 @@ public class FileManager {
                     }
                     fileWrite.close();
                     newFile.setLastModified(modified);
+                    filesAdded.add(newFile);
                 }
                 else {
                     if (deleteTemp.exists()) {
@@ -169,53 +226,16 @@ public class FileManager {
                         newFile.mkdir();
                         newFile.setLastModified(modified);
                     }
+                    foldersAdded.add(newFile);
                 }
             }
         }
-        UpdateMetaData();
-    }
-
-    private void MoveTo(File org, File dest) {
-        if (!dest.exists()) dest.mkdir();
-        if (dest.getName().contains(".") && dest.getName().substring(dest.getName().lastIndexOf(".") + 1).equals("deleted")) {
-            File temp = new File(dest.getName().substring(0, dest.getName().lastIndexOf('.') - 1));
-            dest.renameTo(temp);
-            dest = temp;
-        }
-        List<String> destFiles = new ArrayList<>();
-        File temp;
-        File[] files = dest.listFiles();
-        if (files != null) for (File f : files) destFiles.add(f.getName());
-        files = org.listFiles();
-        if (files != null) {
-            for (File f : files) {
-                if (!f.getName().contains(".") || !f.getName().substring(f.getName().lastIndexOf(".") + 1).equals("deleted")) {
-                    if (!f.isDirectory()) {
-                        if (destFiles.contains(f.getName())) {
-                            destFiles.remove(f.getName());
-                            destFiles.add(f.getName() + ".deleted");
-                        }
-                        if (destFiles.contains(f.getName() + ".deleted")) {
-                            temp = new File(dest.getAbsolutePath() + "/" + f.getName() + ".deleted");
-                            temp.delete();
-                        }
-                        temp = new File(dest.getAbsolutePath() + "/" + f.getName());
-                        f.renameTo(temp);
-                        f = temp;
-                    }
-                    else {
-                        temp = new File(dest.getAbsolutePath() + "/" + f.getName());
-                        MoveTo(f, temp);
-                    }
-                }
-            }
-        }
+        users.Log(3, new String[]{email}, thread, filesAdded, filesDeleted, foldersAdded, filesRenamed);
     }
 
     private void Delete(File file) throws IOException {
         File deletedFile = new File(file.getAbsolutePath() + ".deleted");
         file.renameTo(deletedFile);
-        file = deletedFile;
         deletedFile.setLastModified(System.currentTimeMillis());
         File[] files = deletedFile.listFiles();
         if (files != null) {
@@ -239,38 +259,6 @@ public class FileManager {
         }
     }
 
-    private void UpdateMetaData() {
-        activeFiles = RecursiveFindAllActiveFiles(HomeDirectory);
-        deletedFiles = RecursiveFindAllDeletedFiles(HomeDirectory);
-    }
-
-    private List<Pair<FileClass, Object>> RecursiveFindAllDeletedFiles(File dir) {
-        File[] files = dir.listFiles();
-        List<Pair<FileClass, Object>> list = new ArrayList<>();
-        if (files != null) {
-            for (File f : files) {
-                if (f.getName().contains(".") && f.getName().substring(f.getName().lastIndexOf(".") + 1).equals("deleted")) {
-                    if (f.isDirectory()) list.add(new Pair<>(new FileClass(f), RecursiveFindAllActiveFiles(f)));
-                    else list.add(new Pair<>(new FileClass(f), f.lastModified()));
-                }
-            }
-        }
-        return list;
-    }
-
-    private List<Pair<FileClass, Object>> RecursiveFindAllActiveFiles(File dir) {
-        File[] files = dir.listFiles();
-        List<Pair<FileClass, Object>> list = new ArrayList<>();
-        if (files != null) {
-            for (File f : files) {
-                if (!f.getName().contains(".") || !f.getName().substring(f.getName().lastIndexOf(".") + 1).equals("deleted")) {
-                    if (f.isDirectory()) list.add(new Pair<>(new FileClass(f), RecursiveFindAllActiveFiles(f)));
-                    else list.add(new Pair<>(new FileClass(f), f.lastModified()));
-                }
-            }
-        }
-        return list;
-    }
 
     private long GetLastSync() {
         try {
@@ -309,6 +297,7 @@ public class FileManager {
     private void ReceiveFiles(DataOutputStream dialogOut, DataInputStream dialogIn, InputStream inputStream) throws IOException {
         String name;
         long modified, size;
+        List<File> filesAdded = new ArrayList<>();
         while (!(name = dialogIn.readUTF()).equals("*")) {
             System.out.println("Downloading: " + name);
             File file = GetFile(name, HomeDirectory.getAbsolutePath());
@@ -334,7 +323,9 @@ public class FileManager {
             }
             fileWrite.close();
             file.setLastModified(modified);
+            filesAdded.add(file);
         }
+        users.Log(3, new String[]{email}, null, filesAdded, new ArrayList<>(), new ArrayList<>(), new HashMap<>());
     }
 
     private void SetModified(long time, File file, String homePath) {
@@ -344,14 +335,20 @@ public class FileManager {
 
     private void GetFolders(DataInputStream dialogIn) throws IOException {
         String args;
+        List<File> foldersAdded = new ArrayList<>();
         while (!(args = dialogIn.readUTF()).equals("*")) {
             File dir = GetFile(args, HomeDirectory.getAbsolutePath());
             File deleted = GetFile(args + ".deleted", HomeDirectory.getAbsolutePath());
             if (deleted.exists()) {
                 deleted.renameTo(dir);
+                foldersAdded.add(dir);
             }
-            else if (!dir.exists()) dir.mkdir();
+            else if (!dir.exists()) {
+                dir.mkdir();
+                foldersAdded.add(dir);
+            }
         }
+        users.Log(3, new String[]{email}, null, new ArrayList<>(), new ArrayList<>(), foldersAdded, new HashMap<>());
     }
 
     private void SendFiles(DataOutputStream dialogOut, DataInputStream dialogIn, OutputStream outputStream) throws IOException {
