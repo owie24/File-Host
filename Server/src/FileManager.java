@@ -58,6 +58,7 @@ public class FileManager {
             } catch (IOException e) {
                 try {
                     socket.close();
+                    return null;
                 } catch (IOException ignored) {}
             }
         }

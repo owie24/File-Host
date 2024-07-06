@@ -20,6 +20,7 @@ public class MessageHandlerThread implements Runnable{
     public AtomicBoolean valid;
     public AtomicBoolean update;
     public AtomicBoolean sync;
+    private AtomicBoolean exit;
 
     public List<File> filesAdded;
     public List<File> foldersAdded;
@@ -31,6 +32,7 @@ public class MessageHandlerThread implements Runnable{
 
     public MessageHandlerThread(Socket socket, UserTracking users) throws IOException {
         sync = new AtomicBoolean(false);
+        exit = new AtomicBoolean(false);
         filesAdded = new ArrayList<>();
         filesDeleted = new ArrayList<>();
         filesRenamed =  new HashMap<>();
@@ -52,7 +54,7 @@ public class MessageHandlerThread implements Runnable{
     //new_user or existing_user, email, either pass or, key and HWID
     @Override
     public void run() {
-        while (true) {
+        while (!exit.get()) {
             try {
                 email = null;
                 valid.set(true);
@@ -201,6 +203,7 @@ public class MessageHandlerThread implements Runnable{
                             case "sync" -> {
                                 if (manager.Access(0, outputStream, inputStream, download, upload, socket, this) == null) {
                                     LogOut();
+                                    exit.set(true);
                                     return;
                                 }
                             }
@@ -210,6 +213,7 @@ public class MessageHandlerThread implements Runnable{
                             case "change" -> {
                                 if (manager.Access(2, outputStream, inputStream, download, upload, socket, this) == null) {
                                     LogOut();
+                                    exit.set(true);
                                     return;
                                 }
                             }
