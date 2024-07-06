@@ -196,7 +196,7 @@ public class FileManager {
                     long bytesLeft = dialogIn.readLong();
                     if (deleteTemp.exists()) deleteTemp.delete();
                     if (newFile.exists()) newFile.delete();
-                    newFile.createNewFile();
+                    MakeFile(newFile);
                     OutputStream fileWrite = new FileOutputStream(newFile);
                     dialogOut.writeUTF(">");
                     dialogOut.flush();
@@ -223,7 +223,7 @@ public class FileManager {
                     }
                     else if (newFile.exists()) newFile.setLastModified(Long.max(newFile.lastModified(), modified));
                     else {
-                        newFile.mkdir();
+                        MakeFolder(newFile);
                         newFile.setLastModified(modified);
                     }
                     foldersAdded.add(newFile);
@@ -231,6 +231,34 @@ public class FileManager {
             }
         }
         users.Log(3, new String[]{email}, thread, filesAdded, filesDeleted, foldersAdded, filesRenamed);
+    }
+
+    private void MakeFile(File newFile) throws IOException {
+        String name = ConcatFile(newFile);
+        StringBuilder homepath = new StringBuilder(HomeDirectory.getAbsolutePath());
+        while (name.contains("\\")) {
+            homepath.append("\\").append(name.substring(0, name.indexOf("\\")));
+            name = name.substring(name.indexOf("\\") + 1);
+            File dir = new File(homepath.toString());
+            dir.mkdir();
+        }
+        homepath.append("\\").append(name);
+        File file = new File(homepath.toString());
+        file.createNewFile();
+    }
+
+    private void MakeFolder(File newFile) throws IOException {
+        String name = ConcatFile(newFile);
+        StringBuilder homepath = new StringBuilder(HomeDirectory.getAbsolutePath());
+        while (name.contains("\\")) {
+            homepath.append("\\").append(name.substring(0, name.indexOf("\\")));
+            name = name.substring(name.indexOf("\\") + 1);
+            File dir = new File(homepath.toString());
+            dir.mkdir();
+        }
+        homepath.append("\\").append(name);
+        File file = new File(homepath.toString());
+        file.mkdir();
     }
 
     private void Delete(File file) throws IOException {
