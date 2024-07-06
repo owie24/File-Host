@@ -240,7 +240,7 @@ public class FileManager {
             homepath.append("\\").append(name.substring(0, name.indexOf("\\")));
             name = name.substring(name.indexOf("\\") + 1);
             File dir = new File(homepath.toString());
-            dir.mkdir();
+            if (!dir.exists()) dir.mkdir();
         }
         homepath.append("\\").append(name);
         File file = new File(homepath.toString());
@@ -254,7 +254,7 @@ public class FileManager {
             homepath.append("\\").append(name.substring(0, name.indexOf("\\")));
             name = name.substring(name.indexOf("\\") + 1);
             File dir = new File(homepath.toString());
-            dir.mkdir();
+            if (!dir.exists()) dir.mkdir();
         }
         homepath.append("\\").append(name);
         File file = new File(homepath.toString());
